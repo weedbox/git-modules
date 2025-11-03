@@ -14,8 +14,8 @@ import (
 // Routes:
 // - /repos/username/repo.git/* -> Git protocol (handleGitProtocol)
 func (m *GitHTTP) handleGitProtocolOrAPI(c *gin.Context) {
-	// Extract full path after /repos/
-	// c.Param("path") returns path with leading slash, e.g., "/username/repo.git/info/refs"
+	// Extract full path after URL prefix
+	// c.Param("path") returns path with leading slash, e.g., "/username/repo.git/info/refs" or "/hello.git/info/refs"
 	fullPath := strings.TrimPrefix(c.Param("path"), "/")
 
 	// Check if this is a Git protocol request (contains .git)
@@ -25,6 +25,10 @@ func (m *GitHTTP) handleGitProtocolOrAPI(c *gin.Context) {
 	}
 
 	// Not a valid Git protocol path
+	m.logger.Warn("Invalid git protocol path",
+		zap.String("fullPath", fullPath),
+		zap.String("expected", "path should contain .git (e.g., hello.git/info/refs)"),
+	)
 	c.JSON(http.StatusBadRequest, gin.H{"error": "invalid git protocol path, expected path with .git"})
 }
 
@@ -34,6 +38,7 @@ func (m *GitHTTP) handleGitProtocol(c *gin.Context, fullPath string) {
 	// Extract repository name from path (remove .git suffix and everything after)
 	// Examples:
 	// - "username/repo.git/info/refs" -> "username/repo"
+	// - "hello.git/info/refs" -> "hello"
 	// - "org/team/project.git" -> "org/team/project"
 	var repoName string
 	var gitPath string
@@ -45,6 +50,9 @@ func (m *GitHTTP) handleGitProtocol(c *gin.Context, fullPath string) {
 		repoName = strings.TrimSuffix(fullPath, ".git")
 		gitPath = ""
 	} else {
+		m.logger.Error("Invalid git protocol path format",
+			zap.String("fullPath", fullPath),
+		)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid git protocol path"})
 		return
 	}
@@ -52,37 +60,40 @@ func (m *GitHTTP) handleGitProtocol(c *gin.Context, fullPath string) {
 	// Verify repository exists
 	_, err := m.params.RepositoryManager.GetRepository(repoName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("repository not found: %s", repoName)})
+		m.logger.Warn("Repository not found for git operation",
+			zap.String("repoName", repoName),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   fmt.Sprintf("repository not found: %s", repoName),
+			"hint":    fmt.Sprintf("Create repository first: POST /apis/v1/repos with {\"name\": \"%s\"}", repoName),
+			"repoAPI": "/apis/v1/repos",
+		})
 		return
 	}
 
-	// Rewrite the path for gitkit (gitkit expects paths like: /repo.git/info/refs)
-	// Original: /repos/username/repo.git/info/refs
-	// Gitkit expects: /username/repo.git/info/refs
-	if gitPath != "" {
-		c.Request.URL.Path = "/" + repoName + ".git/" + gitPath
-	} else {
-		c.Request.URL.Path = "/" + repoName + ".git"
-	}
+	// Use http.StripPrefix to remove url_prefix, then delegate to gitkit
+	// This ensures gitkit sees clean paths like /hello.git/info/refs
+	//
+	// Example:
+	//   - url_prefix = "/git/repos"
+	//   - Original request: /git/repos/hello.git/info/refs
+	//   - After StripPrefix: /hello.git/info/refs
+	//   - gitkit finds repo at: data/git-repos/hello.git ✓
 
-	// Log the Git operation
-	m.logger.Info("Git protocol request",
+	originalPath := c.Request.URL.Path
+
+	m.logger.Info("Delegating to gitkit",
 		zap.String("repo", repoName),
 		zap.String("method", c.Request.Method),
-		zap.String("path", c.Request.URL.Path),
+		zap.String("urlPrefix", m.urlPrefix),
+		zap.String("originalPath", originalPath),
+		zap.String("gitPath", gitPath),
+		zap.String("service", c.Query("service")),
+		zap.String("queryString", c.Request.URL.RawQuery),
 	)
 
-	// Delegate to gitkit handler (it's just an http.Handler)
-	m.serveGitPath(c.Writer, c.Request)
-}
-
-// ServeGitHTTP delegates Git HTTP protocol handling to gitkit
-func (m *GitHTTP) serveGitPath(w http.ResponseWriter, r *http.Request) {
-	// gitkit.Server implements http.Handler interface
-	// It handles all Git Smart HTTP protocol operations:
-	// - GET  /repo.git/info/refs?service=git-upload-pack (clone discovery)
-	// - POST /repo.git/git-upload-pack (clone/fetch)
-	// - GET  /repo.git/info/refs?service=git-receive-pack (push discovery)
-	// - POST /repo.git/git-receive-pack (push)
-	m.gitService.ServeHTTP(w, r)
+	// Use StripPrefix to remove url_prefix before passing to gitkit
+	handler := http.StripPrefix(m.urlPrefix, m.gitService)
+	handler.ServeHTTP(c.Writer, c.Request)
 }

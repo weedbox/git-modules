@@ -22,6 +22,7 @@ type GitHTTP struct {
 	logger     *zap.Logger
 	scope      string
 	gitService *gitkit.Server
+	urlPrefix  string
 }
 
 type Params struct {
@@ -67,20 +68,29 @@ func Module(scope string) fx.Option {
 func (m *GitHTTP) onStart(ctx context.Context) error {
 	m.logger.Info("Starting " + ModuleName)
 
+	// Get and save URL prefix
+	m.urlPrefix = viper.GetString(m.getConfigPath("url_prefix"))
+
+	reposPath := m.params.RepositoryManager.GetReposPath()
+	m.logger.Info("Initializing Git HTTP service",
+		zap.String("reposPath", reposPath),
+		zap.String("urlPrefix", m.urlPrefix),
+	)
+
 	// Initializing Git service for HTTP protocol
 	m.gitService = gitkit.New(gitkit.Config{
-		Dir:        m.params.RepositoryManager.GetReposPath(),
+		Dir:        reposPath,
 		AutoCreate: false,
 		AutoHooks:  false,
+		Auth:       false, // Disable authentication for now
 	})
 
-	// Register routes
-	urlPrefix := viper.GetString(m.getConfigPath("url_prefix"))
-	router := m.params.HTTPServer.GetRouter().Group(urlPrefix)
+	// Register routes on main router with urlPrefix
+	router := m.params.HTTPServer.GetRouter()
 
 	// Git HTTP protocol routes - must be registered before other routes to match .git paths
 	// Supports multi-level paths like: /repos/username/repo.git/info/refs
-	router.Any("/*path", m.handleGitProtocolOrAPI)
+	router.Any(m.urlPrefix+"/*path", m.handleGitProtocolOrAPI)
 
 	return nil
 }

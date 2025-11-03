@@ -46,7 +46,7 @@ func (m *RepositoryManagerAPIs) handleCreateRepository(c *gin.Context) {
 	}
 
 	// Create repository (default behavior)
-	repo, err := m.params.RepositoryManager.CreateRepository(req.Name, req.Description, req.IsPrivate)
+	repo, err := m.params.RepositoryManager.CreateRepository(req.Name, req.Description)
 	if err != nil {
 		m.logger.Error("Failed to create repository", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})

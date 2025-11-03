@@ -1,7 +1,6 @@
 package repository_manager
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,15 +15,15 @@ import (
 )
 
 // CreateRepository creates a new Git repository
-func (m *RepositoryManager) CreateRepository(name, description string, isPrivate bool) (*Repository, error) {
+func (m *RepositoryManager) CreateRepository(name, description string) (*Repository, error) {
 	// Validate repository name
 	if name == "" {
-		return nil, fmt.Errorf("repository name cannot be empty")
+		return nil, ErrRepositoryNameEmpty
 	}
 
 	// Sanitize name (allow only alphanumeric, dash, underscore, dot)
 	if !isValidRepoName(name) {
-		return nil, fmt.Errorf("invalid repository name: must contain only alphanumeric characters, dashes, underscores, and dots")
+		return nil, ErrRepositoryInvalidName
 	}
 
 	// Create repository path
@@ -32,20 +31,20 @@ func (m *RepositoryManager) CreateRepository(name, description string, isPrivate
 
 	// Check if repository already exists
 	if _, err := os.Stat(repoPath); err == nil {
-		return nil, fmt.Errorf("repository already exists: %s", name)
+		return nil, NewRepositoryAlreadyExistsError(name)
 	}
 
 	// Create parent directories if they don't exist
 	// For multi-level paths like "username/repo", this ensures "username" directory exists
 	parentDir := filepath.Dir(repoPath)
 	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create parent directories: %w", err)
+		return nil, WrapCreateParentDirsError(err)
 	}
 
 	// Initialize bare repository using go-git
 	_, err := git.PlainInit(repoPath, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize git repository: %w", err)
+		return nil, WrapInitGitRepoError(err)
 	}
 
 	// Open the repository to configure it
@@ -53,13 +52,13 @@ func (m *RepositoryManager) CreateRepository(name, description string, isPrivate
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, WrapOpenRepoError(err)
 	}
 
 	// Get repository config
 	cfg, err := repo.Config()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get repository config: %w", err)
+		return nil, WrapGetRepoConfigError(err)
 	}
 
 	// Enable receive-pack for HTTP push
@@ -78,7 +77,7 @@ func (m *RepositoryManager) CreateRepository(name, description string, isPrivate
 	// Get creation time
 	info, err := os.Stat(repoPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat repository: %w", err)
+		return nil, WrapStatRepoError(err)
 	}
 
 	repository := &Repository{
@@ -104,13 +103,13 @@ func (m *RepositoryManager) DeleteRepository(name string) error {
 
 	// Check if repository exists
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-		return fmt.Errorf("repository not found: %s", name)
+		return NewRepositoryNotFoundError(name)
 	}
 
 	// Delete filesystem directory
 	if err := os.RemoveAll(repoPath); err != nil {
 		m.logger.Error("Failed to delete repository directory", zap.String("path", repoPath), zap.Error(err))
-		return fmt.Errorf("failed to delete repository directory: %w", err)
+		return WrapDeleteRepoDirError(err)
 	}
 
 	m.logger.Info("Repository deleted", zap.String("name", name), zap.String("path", repoPath))
@@ -124,10 +123,10 @@ func (m *RepositoryManager) GetRepository(name string) (*Repository, error) {
 	// Check if repository exists
 	info, err := os.Stat(repoPath)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("repository not found: %s", name)
+		return nil, NewRepositoryNotFoundError(name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat repository: %w", err)
+		return nil, WrapStatRepoError(err)
 	}
 
 	// Open repository to read config
@@ -135,7 +134,7 @@ func (m *RepositoryManager) GetRepository(name string) (*Repository, error) {
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, WrapOpenRepoError(err)
 	}
 
 	// Read description from git config
@@ -219,7 +218,7 @@ func (m *RepositoryManager) ListRepositories() ([]Repository, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to walk repositories directory: %w", err)
+		return nil, WrapWalkReposDirError(err)
 	}
 
 	return repos, nil
@@ -228,7 +227,7 @@ func (m *RepositoryManager) ListRepositories() ([]Repository, error) {
 // CreateTag creates a Git tag
 func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, tagger string) (*Tag, error) {
 	if tagName == "" {
-		return nil, fmt.Errorf("tag name cannot be empty")
+		return nil, ErrTagNameEmpty
 	}
 
 	repoPath := filepath.Join(m.reposPath, repoName+".git")
@@ -238,7 +237,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, WrapOpenRepoError(err)
 	}
 
 	// Get commit hash
@@ -247,7 +246,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 		// Use HEAD if no commit specified
 		ref, err := repo.Head()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get HEAD: %w", err)
+			return nil, WrapGetHEADError(err)
 		}
 		hash = ref.Hash()
 	} else {
@@ -257,7 +256,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 	// Check if commit exists
 	commit, err := repo.CommitObject(hash)
 	if err != nil {
-		return nil, fmt.Errorf("commit not found: %w", err)
+		return nil, WrapCommitNotFoundError(err)
 	}
 
 	tag := &Tag{
@@ -289,11 +288,11 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 		// Encode and store tag object
 		obj := repo.Storer.NewEncodedObject()
 		if err := tagObj.Encode(obj); err != nil {
-			return nil, fmt.Errorf("failed to encode tag object: %w", err)
+			return nil, WrapEncodeTagError(err)
 		}
 		tagHash, err := repo.Storer.SetEncodedObject(obj)
 		if err != nil {
-			return nil, fmt.Errorf("failed to store tag object: %w", err)
+			return nil, WrapStoreTagError(err)
 		}
 
 		// Create reference
@@ -302,7 +301,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 			tagHash,
 		)
 		if err := repo.Storer.SetReference(tagRef); err != nil {
-			return nil, fmt.Errorf("failed to set tag reference: %w", err)
+			return nil, WrapSetTagRefError(err)
 		}
 
 		tag.Type = "annotated"
@@ -316,7 +315,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 			hash,
 		)
 		if err := repo.Storer.SetReference(tagRef); err != nil {
-			return nil, fmt.Errorf("failed to set tag reference: %w", err)
+			return nil, WrapSetTagRefError(err)
 		}
 
 		tag.Type = "lightweight"
@@ -329,7 +328,7 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 // DeleteTag deletes a Git tag
 func (m *RepositoryManager) DeleteTag(repoName, tagName string) error {
 	if tagName == "" {
-		return fmt.Errorf("tag name cannot be empty")
+		return ErrTagNameEmpty
 	}
 
 	repoPath := filepath.Join(m.reposPath, repoName+".git")
@@ -339,13 +338,13 @@ func (m *RepositoryManager) DeleteTag(repoName, tagName string) error {
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
+		return WrapOpenRepoError(err)
 	}
 
 	// Delete tag reference
 	tagRef := plumbing.NewTagReferenceName(tagName)
 	if err := repo.Storer.RemoveReference(tagRef); err != nil {
-		return fmt.Errorf("failed to delete tag: %w", err)
+		return WrapDeleteTagError(err)
 	}
 
 	m.logger.Info("Tag deleted", zap.String("repo", repoName), zap.String("tag", tagName))
@@ -355,7 +354,7 @@ func (m *RepositoryManager) DeleteTag(repoName, tagName string) error {
 // GetTag retrieves a specific tag
 func (m *RepositoryManager) GetTag(repoName, tagName string) (*Tag, error) {
 	if tagName == "" {
-		return nil, fmt.Errorf("tag name cannot be empty")
+		return nil, ErrTagNameEmpty
 	}
 
 	repoPath := filepath.Join(m.reposPath, repoName+".git")
@@ -365,13 +364,13 @@ func (m *RepositoryManager) GetTag(repoName, tagName string) (*Tag, error) {
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, WrapOpenRepoError(err)
 	}
 
 	// Get tag reference
 	tagRef, err := repo.Reference(plumbing.NewTagReferenceName(tagName), true)
 	if err != nil {
-		return nil, fmt.Errorf("tag not found: %w", err)
+		return nil, WrapTagNotFoundError(err)
 	}
 
 	tag := &Tag{
@@ -405,13 +404,13 @@ func (m *RepositoryManager) ListTags(repoName string) ([]Tag, error) {
 	storer := filesystem.NewStorage(fs, cache.NewObjectLRUDefault())
 	repo, err := git.Open(storer, fs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, WrapOpenRepoError(err)
 	}
 
 	// Get all tag references
 	tagRefs, err := repo.Tags()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get tags: %w", err)
+		return nil, WrapGetTagsError(err)
 	}
 
 	tags := make([]Tag, 0)
@@ -441,7 +440,7 @@ func (m *RepositoryManager) ListTags(repoName string) ([]Tag, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to iterate tags: %w", err)
+		return nil, WrapIterateTagsError(err)
 	}
 
 	return tags, nil
@@ -496,7 +495,7 @@ func isValidRepoName(name string) bool {
 func (m *RepositoryManager) CreateGroup(name, description string) (*Group, error) {
 	// Validate group name using the same validation as repository names
 	if !isValidRepoName(name) {
-		return nil, fmt.Errorf("invalid group name: must contain only alphanumeric characters, dashes, underscores, and dots")
+		return nil, ErrGroupInvalidName
 	}
 
 	// Create group path (without .git suffix)
@@ -504,18 +503,18 @@ func (m *RepositoryManager) CreateGroup(name, description string) (*Group, error
 
 	// Check if group already exists
 	if _, err := os.Stat(groupPath); err == nil {
-		return nil, fmt.Errorf("group already exists: %s", name)
+		return nil, NewGroupAlreadyExistsError(name)
 	}
 
 	// Check if a repository with this name exists
 	repoPath := groupPath + ".git"
 	if _, err := os.Stat(repoPath); err == nil {
-		return nil, fmt.Errorf("a repository with this name already exists: %s", name)
+		return nil, NewRepositoryWithNameExistsError(name)
 	}
 
 	// Create the group directory
 	if err := os.MkdirAll(groupPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create group directory: %w", err)
+		return nil, WrapCreateGroupDirError(err)
 	}
 
 	// Create a .groupinfo file to store metadata
@@ -529,7 +528,7 @@ func (m *RepositoryManager) CreateGroup(name, description string) (*Group, error
 	// Get creation time
 	info, err := os.Stat(groupPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat group: %w", err)
+		return nil, WrapStatGroupError(err)
 	}
 
 	group := &Group{
@@ -550,18 +549,18 @@ func (m *RepositoryManager) GetGroup(name string) (*Group, error) {
 	// Check if group exists and is a directory
 	info, err := os.Stat(groupPath)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("group not found: %s", name)
+		return nil, NewGroupNotFoundError(name)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat group: %w", err)
+		return nil, WrapStatGroupError(err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("not a group: %s", name)
+		return nil, NewNotAGroupError(name)
 	}
 
 	// Check if it's actually a repository (has .git in the name)
 	if strings.HasSuffix(groupPath, ".git") {
-		return nil, fmt.Errorf("not a group: %s is a repository", name)
+		return nil, NewGroupIsRepositoryError(name)
 	}
 
 	// Read description from .groupinfo file
@@ -638,7 +637,7 @@ func (m *RepositoryManager) ListGroups() ([]Group, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to walk groups directory: %w", err)
+		return nil, WrapWalkGroupsDirError(err)
 	}
 
 	return groups, nil
@@ -651,31 +650,31 @@ func (m *RepositoryManager) DeleteGroup(name string) error {
 	// Check if group exists
 	info, err := os.Stat(groupPath)
 	if os.IsNotExist(err) {
-		return fmt.Errorf("group not found: %s", name)
+		return NewGroupNotFoundError(name)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to stat group: %w", err)
+		return WrapStatGroupError(err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("not a group: %s", name)
+		return NewNotAGroupError(name)
 	}
 
 	// Check if group is empty (contains only .groupinfo file or is completely empty)
 	entries, err := os.ReadDir(groupPath)
 	if err != nil {
-		return fmt.Errorf("failed to read group directory: %w", err)
+		return WrapReadGroupDirError(err)
 	}
 
 	for _, entry := range entries {
 		if entry.Name() != ".groupinfo" {
-			return fmt.Errorf("group is not empty: %s", name)
+			return NewGroupNotEmptyError(name)
 		}
 	}
 
 	// Delete the directory
 	if err := os.RemoveAll(groupPath); err != nil {
 		m.logger.Error("Failed to delete group directory", zap.String("path", groupPath), zap.Error(err))
-		return fmt.Errorf("failed to delete group directory: %w", err)
+		return WrapDeleteGroupDirError(err)
 	}
 
 	m.logger.Info("Group deleted", zap.String("name", name), zap.String("path", groupPath))

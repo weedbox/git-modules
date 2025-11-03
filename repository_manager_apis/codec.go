@@ -5,7 +5,6 @@ package repository_manager_apis
 type CreateRepositoryRequest struct {
 	Name        string `json:"name" binding:"required" example:"myorg/myrepo"`
 	Description string `json:"description" example:"My awesome repository"`
-	IsPrivate   bool   `json:"is_private" example:"false"`
 	Type        string `json:"type" example:"repository" enums:"repository,group"`
 } // @name CreateRepositoryRequest
 
