@@ -96,7 +96,7 @@ type OperationError struct {
 }
 
 func (e *OperationError) Error() string {
-	return fmt.Sprintf("failed to %s: %w", e.Op, e.Err)
+	return fmt.Sprintf("failed to %s: %v", e.Op, e.Err)
 }
 
 func (e *OperationError) Unwrap() error {

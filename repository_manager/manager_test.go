@@ -89,7 +89,7 @@ func TestCreateRepository_SingleLevel(t *testing.T) {
 	manager, tmpDir := setupTestManager(t)
 	defer teardownTestManager(tmpDir)
 
-	repo, err := manager.CreateRepository("test-repo", "Test repository", false)
+	repo, err := manager.CreateRepository("test-repo", "Test repository")
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCreateRepository_MultiLevel(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			repo, err := manager.CreateRepository(tc.name, tc.description, false)
+			repo, err := manager.CreateRepository(tc.name, tc.description)
 			if err != nil {
 				t.Fatalf("Failed to create repository '%s': %v", tc.name, err)
 			}
@@ -161,7 +161,7 @@ func TestListRepositories_MultiLevel(t *testing.T) {
 	}
 
 	for _, name := range repoNames {
-		_, err := manager.CreateRepository(name, "Test repo: "+name, false)
+		_, err := manager.CreateRepository(name, "Test repo: "+name)
 		if err != nil {
 			t.Fatalf("Failed to create repository '%s': %v", name, err)
 		}
@@ -199,7 +199,7 @@ func TestGetRepository_MultiLevel(t *testing.T) {
 	description := "Multi-level test repository"
 
 	// Create repository
-	_, err := manager.CreateRepository(name, description, false)
+	_, err := manager.CreateRepository(name, description)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestDeleteRepository_MultiLevel(t *testing.T) {
 	name := "org/project/repo"
 
 	// Create repository
-	_, err := manager.CreateRepository(name, "Test repo", false)
+	_, err := manager.CreateRepository(name, "Test repo")
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -258,13 +258,13 @@ func TestCreateRepository_Duplicate(t *testing.T) {
 	name := "user/repo"
 
 	// Create first repository
-	_, err := manager.CreateRepository(name, "First", false)
+	_, err := manager.CreateRepository(name, "First")
 	if err != nil {
 		t.Fatalf("Failed to create first repository: %v", err)
 	}
 
 	// Try to create duplicate
-	_, err = manager.CreateRepository(name, "Second", false)
+	_, err = manager.CreateRepository(name, "Second")
 	if err == nil {
 		t.Error("Expected error when creating duplicate repository, got nil")
 	}
@@ -287,10 +287,123 @@ func TestCreateRepository_InvalidName(t *testing.T) {
 
 	for _, name := range invalidNames {
 		t.Run(name, func(t *testing.T) {
-			_, err := manager.CreateRepository(name, "Test", false)
+			_, err := manager.CreateRepository(name, "Test")
 			if err == nil {
 				t.Errorf("Expected error for invalid name '%s', got nil", name)
 			}
 		})
 	}
+}
+
+// TestPathTraversalProtection tests that all methods properly reject path traversal attempts
+func TestPathTraversalProtection(t *testing.T) {
+	manager, tmpDir := setupTestManager(t)
+	defer teardownTestManager(tmpDir)
+
+	// First, create a valid repository for testing
+	_, err := manager.CreateRepository("test-repo", "Test Repository")
+	if err != nil {
+		t.Fatalf("Failed to create test repository: %v", err)
+	}
+
+	// Path traversal attack patterns
+	attackNames := []string{
+		"../etc/passwd",
+		"../../etc/passwd",
+		"../../../etc/passwd",
+		"foo/../bar",
+		"foo/../../bar",
+		"..",
+		".",
+	}
+
+	t.Run("DeleteRepository", func(t *testing.T) {
+		for _, name := range attackNames {
+			err := manager.DeleteRepository(name)
+			if err == nil {
+				t.Errorf("DeleteRepository should reject path traversal: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("GetRepository", func(t *testing.T) {
+		for _, name := range attackNames {
+			_, err := manager.GetRepository(name)
+			if err == nil {
+				t.Errorf("GetRepository should reject path traversal: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("IsRepository", func(t *testing.T) {
+		for _, name := range attackNames {
+			result := manager.IsRepository(name)
+			if result {
+				t.Errorf("IsRepository should return false for path traversal: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("CreateTag", func(t *testing.T) {
+		for _, name := range attackNames {
+			_, err := manager.CreateTag(name, "v1.0", "", "Test tag", "")
+			if err == nil {
+				t.Errorf("CreateTag should reject path traversal in repo name: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("DeleteTag", func(t *testing.T) {
+		for _, name := range attackNames {
+			err := manager.DeleteTag(name, "v1.0")
+			if err == nil {
+				t.Errorf("DeleteTag should reject path traversal in repo name: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("GetTag", func(t *testing.T) {
+		for _, name := range attackNames {
+			_, err := manager.GetTag(name, "v1.0")
+			if err == nil {
+				t.Errorf("GetTag should reject path traversal in repo name: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("ListTags", func(t *testing.T) {
+		for _, name := range attackNames {
+			_, err := manager.ListTags(name)
+			if err == nil {
+				t.Errorf("ListTags should reject path traversal in repo name: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("DeleteGroup", func(t *testing.T) {
+		for _, name := range attackNames {
+			err := manager.DeleteGroup(name)
+			if err == nil {
+				t.Errorf("DeleteGroup should reject path traversal: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("GetGroup", func(t *testing.T) {
+		for _, name := range attackNames {
+			_, err := manager.GetGroup(name)
+			if err == nil {
+				t.Errorf("GetGroup should reject path traversal: '%s'", name)
+			}
+		}
+	})
+
+	t.Run("IsGroup", func(t *testing.T) {
+		for _, name := range attackNames {
+			result := manager.IsGroup(name)
+			if result {
+				t.Errorf("IsGroup should return false for path traversal: '%s'", name)
+			}
+		}
+	})
 }

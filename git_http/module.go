@@ -107,3 +107,7 @@ func (m *GitHTTP) getConfigPath(key string) string {
 func (m *GitHTTP) initDefaultConfigs() {
 	viper.SetDefault(m.getConfigPath("url_prefix"), DefaultURLPrefix)
 }
+
+func (m *GitHTTP) GetRepoPrefix() string {
+	return m.urlPrefix
+}

@@ -99,6 +99,11 @@ func (m *RepositoryManager) GetReposPath() string {
 
 // DeleteRepository deletes a Git repository
 func (m *RepositoryManager) DeleteRepository(name string) error {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return ErrRepositoryInvalidName
+	}
+
 	repoPath := filepath.Join(m.reposPath, name+".git")
 
 	// Check if repository exists
@@ -118,6 +123,11 @@ func (m *RepositoryManager) DeleteRepository(name string) error {
 
 // GetRepository retrieves a repository by name
 func (m *RepositoryManager) GetRepository(name string) (*Repository, error) {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return nil, ErrRepositoryInvalidName
+	}
+
 	repoPath := filepath.Join(m.reposPath, name+".git")
 
 	// Check if repository exists
@@ -226,6 +236,11 @@ func (m *RepositoryManager) ListRepositories() ([]Repository, error) {
 
 // CreateTag creates a Git tag
 func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, tagger string) (*Tag, error) {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(repoName) {
+		return nil, ErrRepositoryInvalidName
+	}
+
 	if tagName == "" {
 		return nil, ErrTagNameEmpty
 	}
@@ -327,6 +342,11 @@ func (m *RepositoryManager) CreateTag(repoName, tagName, commitHash, message, ta
 
 // DeleteTag deletes a Git tag
 func (m *RepositoryManager) DeleteTag(repoName, tagName string) error {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(repoName) {
+		return ErrRepositoryInvalidName
+	}
+
 	if tagName == "" {
 		return ErrTagNameEmpty
 	}
@@ -353,6 +373,11 @@ func (m *RepositoryManager) DeleteTag(repoName, tagName string) error {
 
 // GetTag retrieves a specific tag
 func (m *RepositoryManager) GetTag(repoName, tagName string) (*Tag, error) {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(repoName) {
+		return nil, ErrRepositoryInvalidName
+	}
+
 	if tagName == "" {
 		return nil, ErrTagNameEmpty
 	}
@@ -397,6 +422,11 @@ func (m *RepositoryManager) GetTag(repoName, tagName string) (*Tag, error) {
 
 // ListTags lists all tags in a repository
 func (m *RepositoryManager) ListTags(repoName string) ([]Tag, error) {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(repoName) {
+		return nil, ErrRepositoryInvalidName
+	}
+
 	repoPath := filepath.Join(m.reposPath, repoName+".git")
 
 	// Open repository
@@ -544,6 +574,11 @@ func (m *RepositoryManager) CreateGroup(name, description string) (*Group, error
 
 // GetGroup retrieves a group by name
 func (m *RepositoryManager) GetGroup(name string) (*Group, error) {
+	// Validate group name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return nil, ErrGroupInvalidName
+	}
+
 	groupPath := filepath.Join(m.reposPath, name)
 
 	// Check if group exists and is a directory
@@ -645,6 +680,11 @@ func (m *RepositoryManager) ListGroups() ([]Group, error) {
 
 // DeleteGroup deletes a group
 func (m *RepositoryManager) DeleteGroup(name string) error {
+	// Validate group name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return ErrGroupInvalidName
+	}
+
 	groupPath := filepath.Join(m.reposPath, name)
 
 	// Check if group exists
@@ -683,6 +723,11 @@ func (m *RepositoryManager) DeleteGroup(name string) error {
 
 // IsGroup checks if the given name is a group (not a repository)
 func (m *RepositoryManager) IsGroup(name string) bool {
+	// Validate group name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return false
+	}
+
 	groupPath := filepath.Join(m.reposPath, name)
 
 	// Check if it exists and is a directory
@@ -697,6 +742,11 @@ func (m *RepositoryManager) IsGroup(name string) bool {
 
 // IsRepository checks if the given name is a repository
 func (m *RepositoryManager) IsRepository(name string) bool {
+	// Validate repository name to prevent path traversal attacks
+	if !isValidRepoName(name) {
+		return false
+	}
+
 	repoPath := filepath.Join(m.reposPath, name+".git")
 
 	// Check if it exists and is a directory
